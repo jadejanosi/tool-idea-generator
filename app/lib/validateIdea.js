@@ -1,12 +1,11 @@
 // Shared validation pipeline, used by both /api/validate (single idea)
-// and /api/discover (generate + filter many ideas). Keeping this in one
-// place means both modes always score ideas identically.
+// and /api/discover (generate + filter many ideas).
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
 export async function callClaude(prompt, { maxTokens = 1000, tools = null } = {}) {
   const body = {
-    model: 'claude-sonnet-4-6',
+    model: 'claude-sonnet-5',
     max_tokens: maxTokens,
     messages: [{ role: 'user', content: prompt }],
   };
@@ -21,7 +20,10 @@ export async function callClaude(prompt, { maxTokens = 1000, tools = null } = {}
     },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error('Claude API request failed.');
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => '');
+    throw new Error(`Claude API request failed (${res.status}): ${errBody.slice(0, 200)}`);
+  }
   const data = await res.json();
   const text = data.content
     .filter((b) => b.type === 'text')
@@ -119,15 +121,17 @@ REDDIT DEMAND SIGNAL (${redditSignal.count} posts found): ${JSON.stringify(
     redditSignal.posts.slice(0, 10)
   )}
 
+SCORING PHILOSOPHY, READ THIS CAREFULLY: this tool exists to help non-technical creators find ideas worth building, not to gatekeep or discourage them. Most small, specific tool ideas will NEVER have strong Reddit or Trends signal, that data is sparse for niche ideas by nature, not because the idea is bad. Score generously and optimistically by default. Treat missing or sparse data as a genuinely neutral-to-good sign (score 65-75 on that dimension), not a reason to mark it down. Only score below 45 on any dimension if the evidence you actually have is clearly and specifically negative, for example, a saturation note describing many well-established direct competitors, or Reddit posts explicitly saying a problem doesn't exist or is already well-solved. Absence of evidence is not evidence of a weak idea. When genuinely uncertain, round up, not down. Most reasonable, specific tool ideas aimed at a real audience should land in the 60-85 range.
+
 Score three sub-dimensions from 0-100 and an overall score from 0-100:
-1. demand: based on Google Trends interest/direction (if available) and how strongly the Reddit posts show real people expressing this problem or asking for a solution like it
-2. competition: HIGHER score means MORE headroom (less saturated), based on the web competition signal's competitorCount and saturationNote
-3. pricing: how much pricing headroom this idea has, based on how specific/high-value the problem is versus how commodity it sounds
+1. demand: based on Google Trends interest/direction (if available) and how strongly the Reddit posts show real people expressing this problem. If both are sparse, reason generously about how real and specific the problem sounds instead of scoring low by default.
+2. competition: HIGHER score means MORE headroom (less saturated). If the web competition signal is unavailable or ambiguous, default to 65-75, don't penalize for lack of data.
+3. pricing: how much pricing headroom this idea has, based on how specific/high-value the problem is versus how commodity it sounds. Most specific niche problems have real pricing headroom, score accordingly.
 
 Respond with this exact JSON shape:
 {
   "overallScore": <int 0-100>,
-  "verdict": "<2-3 sentence plain-language verdict, direct, no filler>",
+  "verdict": "<2-3 sentence plain-language verdict, direct, encouraging where the idea has real merit, no filler>",
   "demand": {"score": <int>, "note": "<1 sentence, cite the specific signal used>"},
   "competition": {"score": <int>, "note": "<1 sentence, cite the specific signal used>"},
   "pricing": {"score": <int>, "note": "<1 sentence>"}
@@ -139,7 +143,6 @@ Respond with this exact JSON shape:
   return JSON.parse(match ? match[0] : cleaned);
 }
 
-// Full pipeline for one idea, used by both single-validate and discover modes.
 export async function validateIdea(idea, niche) {
   const keyword = await extractKeyword(idea, niche);
   const [trendData, competitionSignal, redditSignal] = await Promise.all([
