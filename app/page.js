@@ -3,7 +3,7 @@
 import { useState } from 'react';
 
 export default function Home() {
-  const [mode, setMode] = useState('validate'); // 'validate' | 'discover'
+  const [mode, setMode] = useState('validate');
 
   return (
     <div className="wrap">
@@ -30,16 +30,24 @@ export default function Home() {
 function ValidateMode() {
   const [idea, setIdea] = useState('');
   const [niche, setNiche] = useState('');
+  const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState(null);
 
   async function handleSubmit(e) {
     e.preventDefault();
-    if (!idea.trim()) return;
+    if (!idea.trim() || !email.trim()) return;
     setLoading(true);
     setError('');
     setResult(null);
+
+    // Fire-and-forget email capture, does not block the actual result
+    fetch('/api/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, source: 'idea-validator' }),
+    }).catch(() => {});
 
     try {
       const res = await fetch('/api/validate', {
@@ -76,9 +84,7 @@ function ValidateMode() {
             onChange={(e) => setIdea(e.target.value)}
             required
           />
-
           <div style={{ height: 16 }} />
-
           <label htmlFor="niche">Niche or audience (optional, sharpens results)</label>
           <input
             id="niche"
@@ -87,7 +93,16 @@ function ValidateMode() {
             value={niche}
             onChange={(e) => setNiche(e.target.value)}
           />
-
+          <div style={{ height: 16 }} />
+          <label htmlFor="email">Email (to send you your result and save your spot)</label>
+          <input
+            id="email"
+            type="email"
+            placeholder="you@example.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+          />
           <button className="btn" type="submit" disabled={loading}>
             {loading ? 'Reading the signals…' : 'Validate this idea'}
           </button>
@@ -113,6 +128,7 @@ function ValidateMode() {
 function DiscoverMode() {
   const [niche, setNiche] = useState('');
   const [count, setCount] = useState(6);
+  const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState(null);
@@ -120,10 +136,16 @@ function DiscoverMode() {
 
   async function handleSubmit(e) {
     e.preventDefault();
-    if (!niche.trim()) return;
+    if (!niche.trim() || !email.trim()) return;
     setLoading(true);
     setError('');
     setResult(null);
+
+    fetch('/api/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, source: 'idea-validator-discover' }),
+    }).catch(() => {});
 
     try {
       const res = await fetch('/api/discover', {
@@ -162,21 +184,24 @@ function DiscoverMode() {
             onChange={(e) => setNiche(e.target.value)}
             required
           />
-
           <div style={{ height: 16 }} />
-
           <label htmlFor="disc-count">How many ideas to generate and check</label>
-          <select
-            id="disc-count"
-            value={count}
-            onChange={(e) => setCount(Number(e.target.value))}
-          >
+          <select id="disc-count" value={count} onChange={(e) => setCount(Number(e.target.value))}>
             <option value={4}>4 (fastest)</option>
             <option value={6}>6 (recommended)</option>
             <option value={8}>8</option>
             <option value={10}>10 (slowest, may time out on free hosting tiers)</option>
           </select>
-
+          <div style={{ height: 16 }} />
+          <label htmlFor="disc-email">Email (to send you your results and save your spot)</label>
+          <input
+            id="disc-email"
+            type="email"
+            placeholder="you@example.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+          />
           <button className="btn" type="submit" disabled={loading}>
             {loading ? 'Generating and checking each idea…' : 'Find validated ideas'}
           </button>
@@ -187,17 +212,10 @@ function DiscoverMode() {
         {result && (
           <div className="readout">
             <div className="discover-summary">
-              {result.passedCount} of {result.generated} ideas cleared the bar
-              for &ldquo;{result.niche}&rdquo;
+              {result.belowBarShown
+                ? `None of the ${result.generated} ideas cleared the usual bar for "${result.niche}", showing the top ${result.passedCount} closest scores instead`
+                : `${result.passedCount} of ${result.generated} ideas cleared the bar for "${result.niche}"`}
             </div>
-
-            {result.passed.length === 0 && (
-              <div className="footer-note">
-                None of the generated ideas scored high enough this round. Try
-                a more specific niche, or run it again, results vary since the
-                candidates are freshly generated each time.
-              </div>
-            )}
 
             {result.passed.map((r, i) => (
               <div key={i} className="discover-card">
@@ -208,11 +226,7 @@ function DiscoverMode() {
 
             {result.failed && result.failed.length > 0 && (
               <div className="failed-toggle-wrap">
-                <button
-                  className="failed-toggle"
-                  onClick={() => setShowFailed(!showFailed)}
-                  type="button"
-                >
+                <button className="failed-toggle" onClick={() => setShowFailed(!showFailed)} type="button">
                   {showFailed ? 'Hide' : 'Show'} {result.failed.length} idea
                   {result.failed.length === 1 ? '' : 's'} that didn&apos;t make the cut
                 </button>
@@ -231,8 +245,7 @@ function DiscoverMode() {
 
             <div className="footer-note">
               Every idea above went through the exact same validation pipeline
-              as Validate mode, search trend, live competition search, and
-              real community demand language. Nothing here is guessed.
+              as Validate mode. Nothing here is guessed.
             </div>
           </div>
         )}
@@ -251,11 +264,7 @@ function ScoreBlock({ result, compact }) {
       <div className="verdict">{result.verdict}</div>
       <div className="gauges">
         <Gauge name="Demand signal" score={result.demand.score} note={result.demand.note} />
-        <Gauge
-          name="Competition headroom"
-          score={result.competition.score}
-          note={result.competition.note}
-        />
+        <Gauge name="Competition headroom" score={result.competition.score} note={result.competition.note} />
         <Gauge name="Pricing headroom" score={result.pricing.score} note={result.pricing.note} />
       </div>
     </>
